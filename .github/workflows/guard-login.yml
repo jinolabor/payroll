@@ -1,0 +1,35 @@
+# index.html 에 TEAM JINO 로그인 화면이 빠진 채 올라오면 자동으로 직전 포장본으로 되돌린다.
+name: 로그인 잠금 검사
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+concurrency:
+  group: guard-login
+  cancel-in-progress: false
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 100
+      - name: 포장 여부 검사, 아니면 되돌리기
+        run: |
+          set -u
+          if bash tools/check-wrapped.sh index.html; then exit 0; fi
+          echo "::warning::로그인 화면이 없는 index.html 이 올라왔습니다. 직전 포장본을 찾습니다."
+          good=""
+          for c in $(git rev-list HEAD -- index.html); do
+            git show "$c:index.html" > /tmp/cand.html 2>/dev/null || continue
+            if bash tools/check-wrapped.sh /tmp/cand.html >/dev/null; then good="$c"; break; fi
+          done
+          if [ -z "$good" ]; then echo "::error::되돌릴 포장본을 찾지 못했습니다. 직접 확인이 필요합니다."; exit 1; fi
+          git checkout "$good" -- index.html
+          git config user.name "jino-guard"
+          git config user.email "jino-guard@users.noreply.github.com"
+          git commit -m "자동 복구: 로그인 화면 없는 파일이 올라와 ${good:0:7} 의 포장본으로 되돌림"
+          git push origin HEAD:main
+          echo "::error::잠금 없는 원본이 올라와 ${good:0:7} 버전으로 자동 복구했습니다. 수정 내용은 포장본으로 다시 올려야 합니다."
+          exit 1
